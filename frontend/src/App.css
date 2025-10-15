@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+.text {
+    font-family: "Noto Serif SC", serif;
+}

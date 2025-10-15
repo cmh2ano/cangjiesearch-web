@@ -1,0 +1,194 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  ACMCertificateArnParam:
+    Description: Public SSL/TLS certificate ARN published by AWS Certificate Manager (ACM)
+    Type: String
+  RootDomainParam:
+    Description: Specify a root domain for your website
+    Type: String
+  SubdomainParam:
+    Description: Specify a subdomain
+    Type: String
+    Default: www
+  CloudFrontFunctionNameParam:
+    Description: Specify a CloudFront function name
+    Type: String
+
+Resources:
+  CloudFrontOAI:
+    Type: 'AWS::CloudFront::CloudFrontOriginAccessIdentity'
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: 'OAI for s3 origins'
+  CloudFrontFunctionForSubdomain:
+    Type: 'AWS::CloudFront::Function'
+    Properties:
+      Name: !Ref CloudFrontFunctionNameParam
+      FunctionConfig:
+        Comment: CloudFront function
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var response = event.request;
+          if (response.uri === '/index.html') {
+            response = {
+              statusCode: 301,
+              statusDescription: 'Moved Permanently',
+              headers: {
+                location: {
+                  value: '/'
+                }
+              }
+            };
+          }
+          return response;
+        }
+      AutoPublish: true
+  CloudFrontDistributionForSubdomain:
+    Type: 'AWS::CloudFront::Distribution'
+    Properties:
+      DistributionConfig:
+        Comment: CloudFront distribution points to s3 bucket for subdomain
+        Origins:
+          - DomainName: !Sub '${SubdomainParam}.${RootDomainParam}.s3.${AWS::Region}.amazonaws.com'
+            Id: !Sub 'S3Origin-${SubdomainParam}.${RootDomainParam}'
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOAI}'
+        Aliases:
+          - !Sub '${SubdomainParam}.${RootDomainParam}'
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 404
+            ResponsePagePath: '/error.html'
+            ErrorCachingMinTTL: 60
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          DefaultTTL: 3600
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          MaxTTL: 86400
+          MinTTL: 60
+          TargetOriginId: !Sub 'S3Origin-${SubdomainParam}.${RootDomainParam}'
+          ViewerProtocolPolicy: 'redirect-to-https'
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt CloudFrontFunctionForSubdomain.FunctionMetadata.FunctionARN
+        DefaultRootObject: 'index.html'
+        Enabled: true
+        HttpVersion: http2
+        PriceClass: PriceClass_All
+        ViewerCertificate:
+          AcmCertificateArn: !Ref ACMCertificateArnParam
+          SslSupportMethod: sni-only
+  PolicyForS3BucketForSubdomain:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Sub '${SubdomainParam}.${RootDomainParam}'
+      PolicyDocument:
+        Statement:
+          - Action: 's3:GetObject'
+            Effect: Allow
+            Resource: !Sub 'arn:aws:s3:::${SubdomainParam}.${RootDomainParam}/*'
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOAI.S3CanonicalUserId
+          - Sid: AllowSSLRequestsOnly 
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${SubdomainParam}.${RootDomainParam}'
+              - !Sub 'arn:aws:s3:::${SubdomainParam}.${RootDomainParam}/*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+  CloudFrontDistributionForRootDomain:
+    Type: 'AWS::CloudFront::Distribution'
+    Properties:
+      DistributionConfig:
+        Comment: CloudFront distribution points to S3 bucket for root domain
+        Origins:
+          - DomainName: !Sub '${RootDomainParam}.s3-website.${AWS::Region}.amazonaws.com'
+            Id: !Sub 'RedirectS3Origin-${RootDomainParam}'
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: 'http-only'
+        Aliases:
+          - !Sub '${RootDomainParam}'
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 404
+            ResponsePagePath: '/error.html'
+            ErrorCachingMinTTL: 60
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          DefaultTTL: 3600
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          MaxTTL: 86400
+          MinTTL: 60
+          TargetOriginId: !Sub 'RedirectS3Origin-${RootDomainParam}'
+          ViewerProtocolPolicy: 'redirect-to-https'
+        DefaultRootObject: 'index.html'
+        Enabled: true
+        HttpVersion: http2
+        PriceClass: PriceClass_All
+        ViewerCertificate:
+          AcmCertificateArn: !Ref ACMCertificateArnParam
+          SslSupportMethod: sni-only
+  PolicyForS3BucketForRootDomain:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Sub '${RootDomainParam}'
+      PolicyDocument:
+        Statement:
+          - Action: 's3:GetObject'
+            Effect: Allow
+            Resource: !Sub 'arn:aws:s3:::${RootDomainParam}/*'
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOAI.S3CanonicalUserId
+          - Sid: AllowSSLRequestsOnly
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${RootDomainParam}'
+              - !Sub 'arn:aws:s3:::${RootDomainParam}/*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+
+Outputs:
+  CloudFrontDistributionForRootDomainId:
+    Description: CloudFront distribution ID for root domain
+    Value: !Ref CloudFrontDistributionForRootDomain
+  CloudFrontDistributionDomainNameForRootDomain:
+    Description: CloudFront distribution domain name for root domain
+    Value: !GetAtt CloudFrontDistributionForRootDomain.DomainName  
+  CloudFrontDistributionForSubdomainId:
+    Description: CloudFront distribution ID for subdomain
+    Value: !Ref CloudFrontDistributionForSubdomain
+  CloudFrontDistributionDomainNameForSubdomain:
+    Description: CloudFront distribution domain name for subdomain
+    Value: !GetAtt CloudFrontDistributionForSubdomain.DomainName

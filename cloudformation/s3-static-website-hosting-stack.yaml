@@ -1,0 +1,39 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  RootDomainParam:
+    Description: Specify a root domain for the website
+    Type: String
+  SubdomainParam:
+    Description: Specify a subdomain
+    Type: String
+    Default: www
+
+Resources:
+  S3BucketForSubdomain:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub ${SubdomainParam}.${RootDomainParam}
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+      AccessControl: BucketOwnerFullControl
+  S3BucketForRootDomain:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref RootDomainParam
+      WebsiteConfiguration:
+        RedirectAllRequestsTo:
+          HostName: !Ref S3BucketForSubdomain
+          Protocol: https
+      AccessControl: BucketOwnerFullControl
+
+Outputs:
+  WebsiteURLForRootDomain:
+    Value: !GetAtt S3BucketForRootDomain.WebsiteURL
+    Description: Website endpoint for root domain
+  WebsiteURLForSubdomain:
+    Value: !GetAtt S3BucketForSubdomain.WebsiteURL
+    Description: Website endpoint for subdomain

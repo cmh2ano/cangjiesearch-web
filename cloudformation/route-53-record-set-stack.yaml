@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  CloudFrontDistributionDomainNameForRootDomainParam:
+    Description: Specify CloudFront distribution domain name for root domain
+    Type: String
+  CloudFrontDistributionDomainNameForSubdomainParam:
+    Description: Specify CloudFront distribution domain name for subdomain
+    Type: String
+  HostedZoneIdParam:
+    Description: Specify a public hosted zone ID
+    Type: String
+  RootDomainParam:
+    Description: Specify a root domain
+    Type: String
+  SubdomainParam:
+    Description: Specify a subdomain
+    Type: String
+    Default: www
+
+Conditions:
+  HasSubdomainName: !Not [!Equals [!Ref SubdomainParam, '']] 
+
+Resources:
+  Route53RecordSetForRootDomain:
+    Type: 'AWS::Route53::RecordSetGroup'
+    Properties:
+      HostedZoneId: !Ref HostedZoneIdParam
+      RecordSets:
+        - Name: !Ref RootDomainParam
+          Type: A
+          AliasTarget:
+            DNSName: !Ref CloudFrontDistributionDomainNameForRootDomainParam
+            HostedZoneId: Z2FDTNDATAQYW2
+  Route53RecordSetForSubdomain:
+    Condition: HasSubdomainName
+    Type: 'AWS::Route53::RecordSetGroup'
+    Properties:
+      HostedZoneId: !Ref HostedZoneIdParam
+      RecordSets:
+        - Name: !Sub ${SubdomainParam}.${RootDomainParam}
+          Type: A
+          AliasTarget:
+            DNSName: !Ref CloudFrontDistributionDomainNameForSubdomainParam
+            HostedZoneId: Z2FDTNDATAQYW2
+
+Outputs:
+  WebsiteURLForRootDomain:
+    Value: !Sub 'http://${RootDomainParam}/'
+    Description: Website URL for root domain
+  WebsiteURLForSubomain:
+    Value: !Sub 'http://${SubdomainParam}.${RootDomainParam}/'
+    Description: Website URL for subdomain
+    Condition: HasSubdomainName

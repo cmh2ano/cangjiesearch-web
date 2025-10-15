@@ -1,0 +1,26 @@
+version: 0.2
+phases:
+  install:
+    runtime-version:
+      nodejs: 22
+    commands:
+      - echo Start installation
+      - cd $CODEBUILD_SRC_DIR/cangjiesearch-web
+      - npm install
+  build:
+    commands:
+      - echo Start build process
+      - cd $CODEBUILD_SRC_DIR/cangjiesearch-web
+      - npm run build
+  post_build:
+    commands:
+      - echo Finish build process
+      - cd $CODEBUILD_SRC_DIR/cangjiesearch-web
+      - mv error.html dist
+      - cd dist
+      - ls -al
+artifacts:
+  base-directory: 'cangjiesearch-web/dist'
+  discard-paths: no
+  files:
+    - '**/*'

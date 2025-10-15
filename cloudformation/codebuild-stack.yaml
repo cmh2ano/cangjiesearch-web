@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  GithubLinkParam:
+    Type: String
+    ConstraintDescription: GitHub link is missing
+    Description: Provide your GitHub link with source code for static website
+  BuildSpecRelativePathParam:
+    Type: String
+    Description: Provide a relative path for BuildSpec yaml file in source code
+  CodeBuildProjectNameParam:
+    Type: String
+    MinLength: 10
+    MaxLength: 255
+    AllowedPattern: ^[a-zA-Z][-a-zA-Z0-9]*$
+    ConstraintDescription: Should contain uppercase, lowercase letters and digits from 0 to 9 only
+    Description: Provide name for CodeBuild project
+  S3BucketNameParam:
+    Type: String
+    ConstraintDescription: S3 bucket is missing
+    Description: Provide existing S3 bucket that hosts static website
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub role-for-${CodeBuildProjectNameParam}
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+      Policies:
+        - PolicyName: !Sub policy-for-${CodeBuildProjectNameParam}
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource:
+                  - !Sub arn:aws:logs:*:*:*
+              - Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketAcl
+                  - s3:GetBucketLocation
+                Effect: Allow
+                Resource:
+                  - !Sub arn:aws:s3:::${S3BucketNameParam}
+                  - !Sub arn:aws:s3:::${S3BucketNameParam}/*
+  CodeBuildSourceCredential:
+    Type: AWS::CodeBuild::SourceCredential
+    Properties:
+      AuthType: PERSONAL_ACCESS_TOKEN
+      ServerType: GITHUB
+      Token: "{{resolve:secretsmanager:GithubAccessTokenSecret:SecretString:token}}"
+  CodeBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref CodeBuildProjectNameParam
+      Source:
+        Type: GITHUB
+        Location: !Ref GithubLinkParam
+        GitCloneDepth: 1
+        BuildSpec: !Ref BuildSpecRelativePathParam
+        Auth:
+          Resource: !Ref CodeBuildSourceCredential
+          Type: OAUTH
+      Triggers:
+        Webhook: true
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: PUSH
+            - Type: HEAD_REF
+              Pattern: ^refs/heads/main
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+      ServiceRole: !Ref CodeBuildRole
+      TimeoutInMinutes: 5
+      Artifacts:
+        Type: S3
+        Name: /
+        Location: !Sub arn:aws:s3:::${S3BucketNameParam}
+        EncryptionDisabled: True
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Sub ${CodeBuildProjectNameParam}-cloud-watch-logs
+
+Outputs:
+  CodeBuildProject:
+    Description: CodeBuild project name
+    Value: !Ref CodeBuildProjectNameParam
